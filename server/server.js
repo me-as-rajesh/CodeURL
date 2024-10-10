@@ -1,9 +1,15 @@
-const express = require('express');
+const express = require("express");
 const bodyParser = require('body-parser');
 const Pusher = require('pusher');
 const cors = require('cors'); // Import the cors package
 const app = express();
-const PORT = process.env.PORT || 3000;
+const dotenv = require('dotenv');
+const path = require('path');
+
+const PORT = process.env.PORT || 3001;
+
+dotenv.config({path:path.join(__dirname,'./config.env')})
+
 
 // Middleware
 app.use(cors()); // Enable CORS for all routes
@@ -14,10 +20,10 @@ const messages = {}; // Object to store messages keyed by ID
 
 // Pusher setup
 const pusher = new Pusher({
-    appId: "1877328",
-    key: "673ad43ec9062d1735b2",
-    secret: "f8561c5bcc1222e976f7",
-    cluster: "ap2",
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
     useTLS: true
 });
 
