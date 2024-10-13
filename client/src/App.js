@@ -6,32 +6,30 @@ import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
 
 const App = () => {
-  const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [sendId, setSendId] = useState('');
   const [searchId, setSearchId] = useState('');
   const [isSending, setIsSending] = useState(false);
 
-  const MESSAGE_EXPIRATION_TIME = 5 * 60 * 1000; // 5 minutes in milliseconds
+  const MESSAGE_EXPIRATION_TIME = 5 * 60 * 1000; // 5 minute in milliseconds
 
   // Memoize the function to avoid unnecessary re-renders
   const isMessageExpired = useCallback((timestamp) => {
     return (Date.now() - timestamp) >= MESSAGE_EXPIRATION_TIME;
   }, [MESSAGE_EXPIRATION_TIME]);
 
+  // Remove expired messages from localStorage
   const removeExpiredMessages = useCallback(() => {
     const storedMessages = JSON.parse(localStorage.getItem('messages')) || [];
     const validMessages = storedMessages.filter(msg => !isMessageExpired(msg.timestamp));
 
-    setMessages(validMessages); // Update state with only valid messages
-    localStorage.setItem('messages', JSON.stringify(validMessages)); // Update localStorage
+    localStorage.setItem('messages', JSON.stringify(validMessages));
   }, [isMessageExpired]);
 
   useEffect(() => {
     const storedMessages = JSON.parse(localStorage.getItem('messages')) || [];
     const validMessages = storedMessages.filter(msg => !isMessageExpired(msg.timestamp));
 
-    setMessages(validMessages);
     localStorage.setItem('messages', JSON.stringify(validMessages));
 
     const pusher = new Pusher('673ad43ec9062d1735b2', {
@@ -39,26 +37,38 @@ const App = () => {
     });
 
     const channel = pusher.subscribe('my-channel');
+
     channel.bind('my-event', (data) => {
-      setMessages((prevMessages) => {
-        const updatedMessages = [...prevMessages, data];
-        localStorage.setItem('messages', JSON.stringify(updatedMessages));
-        return updatedMessages;
-      });
-      notify(`New message received with ID: ${data.id}`);
+      // Add timestamp when the message is received, not during sending
+      const newMessage = { ...data, timestamp: Date.now() };
+
+      // Update local storage with the updated messages array
+      const storedMessages = JSON.parse(localStorage.getItem('messages')) || [];
+      const existingMessageIndex = storedMessages.findIndex((msg) => msg.id === data.id);
+      let updatedMessages;
+
+      if (existingMessageIndex !== -1) {
+        // If the message with the same ID exists, replace it
+        updatedMessages = [...storedMessages];
+        updatedMessages[existingMessageIndex] = newMessage;
+      } else {
+        // If no message with the same ID exists, add it as a new entry
+        updatedMessages = [...storedMessages, newMessage];
+      }
+
+      localStorage.setItem('messages', JSON.stringify(updatedMessages));
     });
 
-    // Set interval to check and remove expired messages every minute
     const interval = setInterval(() => {
       removeExpiredMessages();
-    }, 60000); // Check every minute
+    }, 60000);
 
     return () => {
       channel.unbind_all();
       channel.unsubscribe();
-      clearInterval(interval); // Cleanup the interval on unmount
+      clearInterval(interval);
     };
-  }, [isMessageExpired, removeExpiredMessages]); // Add the memoized functions as dependencies
+  }, [isMessageExpired, removeExpiredMessages]);
 
   const validateMessage = (msg) => {
     if (!msg || msg.trim().length === 0) {
@@ -83,46 +93,19 @@ const App = () => {
     const messageError = validateMessage(message);
     const idError = validateId(sendId);
 
-    if (messageError) {
-      notify(messageError);
-      return;
-    }
-
-    if (idError) {
-      notify(idError);
+    if (messageError || idError) {
+      notify(messageError || idError);
       return;
     }
 
     setIsSending(true);
 
     try {
-      await axios.post('http://localhost:3001/api/trigger-message', {
-        message,
-        id: sendId,
-      });
-
-      const existingMessageIndex = messages.findIndex((msg) => msg.id === sendId);
-      let updatedMessages;
-
-      const newMessage = { id: sendId, message, timestamp: Date.now() }; // Add timestamp
-
-      if (existingMessageIndex !== -1) {
-        updatedMessages = [...messages];
-        updatedMessages[existingMessageIndex].message = message;
-        updatedMessages[existingMessageIndex].timestamp = Date.now(); // Update timestamp on message change
-        notify(`Message with ID: ${sendId} updated successfully!`);
-      } else {
-        updatedMessages = [...messages, newMessage];
-        notify(`Message sent with ID: ${sendId}`);
-      }
-
-      setMessages(updatedMessages);
-      localStorage.setItem('messages', JSON.stringify(updatedMessages));
-
+      await axios.post('http://localhost:3001/api/trigger-message', { message, id: sendId });
+      notify(`Message sent with ID: ${sendId}`);
       setMessage('');
       setSendId('');
     } catch (error) {
-      console.error('Error sending message:', error);
       notify('Failed to send message. Please try again.');
     } finally {
       setIsSending(false);
@@ -150,9 +133,49 @@ const App = () => {
     }
   };
 
+  const copyToClipboard = () => {
+    if (message) {
+        // Check if the Clipboard API is supported
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(message)
+                .then(() => {
+                    notify('Message copied to clipboard!');
+                })
+                .catch((error) => {
+                    console.error('Could not copy text: ', error);
+                    notify('Failed to copy message, falling back to older method.');
+                    fallbackCopyToClipboard(message);
+                });
+        } else {
+            console.error('Clipboard API not supported, using fallback method.');
+            fallbackCopyToClipboard(message);
+        }
+    } else {
+        notify('No message to copy!');
+    }
+};
+
+const fallbackCopyToClipboard = (text) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        notify('Message copied to clipboard using fallback method!');
+    } catch (error) {
+        console.error('Fallback: Could not copy text: ', error);
+        notify('Failed to copy message using fallback method.');
+    }
+    document.body.removeChild(textarea);
+};
+
+
   return (
     <div className="app-container">
       <ToastContainer position="top-center" />
+      <h1 className="app-title">Real-Time Messenger</h1>
+
       <div className="top-section">
         <div className="search-id">
           <label>Search ID</label>
@@ -164,7 +187,7 @@ const App = () => {
           />
           <button onClick={searchMessage} className="search-button">Search</button>
         </div>
-        <h1 className="app-title">Real-Time Messenger</h1>
+
         <div className="create-id">
           <label>Create ID</label>
           <input
@@ -180,14 +203,22 @@ const App = () => {
       </div>
 
       <div className="message-section">
-        <label>Message:</label>
+        <div className="note-section">
+          <div className="note-rule">
+            <label>NOTE:<span style={{ color: 'red', fontSize: '12px' }}>* The message will be deleted in 5 min</span></label>
+          </div>
+          <div className="note-button">
+            <button onClick={copyToClipboard} className="copy-button">Copy</button>
+          </div>
+        </div>
         <textarea
           placeholder="Type your message"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          rows="4"
+          className="code-textarea"
         />
       </div>
+
     </div>
   );
 };
